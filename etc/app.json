@@ -1,0 +1,35 @@
+{
+  "kind": "app",
+  "name": "git",
+  "version": "0.1.0",
+  "programs": {
+    "git": "bin/git.wasm"
+  },
+  "provides": [
+    {
+      "interface": "git/1",
+      "functions": {
+        "clone": {
+          "writes": true,
+          "args": {
+            "url": "string",
+            "hash": "string"
+          },
+          "answer": {
+            "tree": "cid",
+            "app": "cid"
+          }
+        }
+      }
+    }
+  ],
+  "requires": [],
+  "dispatch": [
+    {
+      "address": "git",
+      "sender": "$owner",
+      "program": "git"
+    }
+  ],
+  "description": "The git app (shruggr/skein#91): {fn: \"git.clone\", args: {url, hash}} from the owner fetches one commit of an http(s) git repository through the fetch provider (smart HTTP, protocol version 2, one shallow pack), checks it against the hash, keeps its commit, trees and blobs as blocks, builds the app record of its tree from etc/app.json and answers {tree, app}. It writes no head: the owner's head message installs."
+}
