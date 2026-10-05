@@ -4,7 +4,7 @@ The git app for a [skein](https://github.com/shruggr/skein): it clones one
 commit of a git repository into the instance's store, by hash, inside the
 VM, and builds the app record of its tree. With it an app is deployed from a
 page by two owner-signed messages: the clone, then the install (`head`,
-`dispatch`, `start`). Version **0.1.0**.
+`dispatch`, `start`). Version **0.1.1**.
 
 ## What it is
 
@@ -28,8 +28,9 @@ sender) and, either way, the request thread's result:
 What happens, in the instance's log (one thread, three steps):
 
 1. The call is checked, and `GET <url>/info/refs?service=git-upload-pack`
-   (`Git-Protocol: version=2`) is emitted to the address book's `fetch`
-   provider: the host's HTTP transport. The thread rests on its answer.
+   (`Git-Protocol: version=2`) is recorded as a `fetch` intention (`sk.fetch`,
+   shruggr/skein#126): the runtime sends it, signed with the instance's key,
+   to its HTTP proxy. The thread rests on the proxy's signed answer.
 2. On the advertisement (a protocol version 2 server offering shallow
    fetches), `POST <url>/git-upload-pack` is emitted: `command=fetch`,
    `want <hash>`, `deepen 1`, `ofs-delta`, `no-progress`, `done` — no
@@ -45,8 +46,8 @@ What happens, in the instance's log (one thread, three steps):
    the commit, the tree and the app record are kept; the answer goes out.
 
 The pack itself is not stored: only the objects the commit reaches. (The
-fetch provider's answer, which carries it, is an entry of the log, as every
-provider's answer is: replay reads it from there and never asks the
+HTTP proxy's answer, which carries it, is an entry of the log, as every
+service's answer is: replay reads it from there and never asks the
 network.)
 
 **The app record** is the one skein's install client builds for the same
@@ -66,7 +67,7 @@ an app, and only the owner's `dispatch` messages give it rows. It has no
 `$self` row and sends nothing to its own instance.
 
 Error codes: `bad-request` (not `{fn, args}`), `unknown-fn`, `bad-args` (the
-url or the hash is not one), `unreachable` (the fetch provider could not
+url or the hash is not one), `unreachable` (the HTTP proxy could not
 reach the url), `not-git` (an HTTP status other than 200, or not a protocol
 version 2 server with shallow fetches), `not-found` (the server does not
 hold the commit), `too-large` (the pack is over 32 MiB, or unpacks to more
@@ -79,7 +80,7 @@ Submodules (gitlinks) are entries of a tree, not followed. `push` is later.
 ## Use it
 
 ```
-skein-host install https://github.com/shruggr/skein-git#v0.1.0 --instance <handle>
+skein-host install https://github.com/shruggr/skein-git#v0.1.1 --instance <handle>
 ```
 
 Then, as the owner, `{fn: "git.clone", args: {url, hash}}` to box `git`,
@@ -92,7 +93,7 @@ The manifest, `etc/app.json` (description left out):
 {
   "kind": "app",
   "name": "git",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "programs": { "git": "bin/git.wasm" },
   "provides": [{ "interface": "git/1", "functions": {
     "clone": { "writes": true, "args": { "url": "string", "hash": "string" },
@@ -137,15 +138,15 @@ store replayed.
 |---|---|
 | the program's contract | `src/main.zig` |
 | apps, the app record, install (the two paths) | skein `docs/APPS.md` §2, §3 |
-| the fetch provider | skein `docs/MESSAGES.md` "The providers" |
+| the fetch intention | skein `docs/MESSAGES.md` "Intentions: deadline and fetch" |
 
 ## Versions
 
 | | |
 |---|---|
-| this app | 0.1.0 (tag `v0.1.0`) |
-| skein-sdk | v0.4.0, by tag tarball and hash in `build.zig.zon` (`cbor`, `sk`, `app`, `dagjson`; no wallet) |
-| skein | log format 8; the fetch provider's `maxBytes` (#91); skein's equivs pin this repo by commit |
+| this app | 0.1.1 (tag `v0.1.1`): fetches by the `fetch` intention (`sk.fetch`; the address book has no roles, shruggr/skein#126) |
+| skein-sdk | v0.7.1, by tag tarball and hash in `build.zig.zon` (`cbor`, `sk`, `app`, `dagjson`; no wallet) |
+| skein | log format 8; the fetch intention's `maxBytes` (#91, #126); skein's equivs pin this repo by commit |
 
 ## Contributing
 

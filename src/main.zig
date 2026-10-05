@@ -16,8 +16,8 @@
 //! does three steps, each on one entry:
 //!
 //!   1. checks the call and emits GET <url>/info/refs?service=git-upload-pack
-//!      (Git-Protocol: version=2) to the address book's `fetch` provider — the
-//!      host's HTTP transport — and rests on its answer;
+//!      (Git-Protocol: version=2) as a `fetch` intention (sk.fetch) — the
+//!      runtime's HTTP proxy answers it — and rests on its answer;
 //!   2. on the advertisement (a version 2 server offering shallow fetches):
 //!      emits POST <url>/git-upload-pack, `fetch` of `want <hash>`, `deepen 1`
 //!      (src/pkt.zig), and rests;
@@ -37,7 +37,7 @@
 //! app; the owner's `dispatch` messages give it rows.
 //!
 //! Error codes: bad-request (not {fn, args}), unknown-fn, bad-args (the url or
-//! the hash is not one), unreachable (the fetch provider could not reach the
+//! the hash is not one), unreachable (the HTTP proxy could not reach the
 //! url), not-git (an HTTP status other than 200, or not a git protocol
 //! version 2 server with shallow fetches), not-found (the server does not
 //! hold the commit), too-large (the pack is over MAX_PACK, or unpacks to over
@@ -69,7 +69,7 @@ pub const MAX_UNPACKED: usize = 256 << 20;
 pub const MAX_OBJECTS: usize = 200_000;
 /// The largest advertisement taken.
 const MAX_ADVERTISEMENT: usize = 1 << 20;
-/// How long the fetch provider waits for each request.
+/// How long the HTTP proxy waits for each request.
 const TIMEOUT_MS: i64 = 120_000;
 
 pub fn main() u8 {
@@ -86,7 +86,7 @@ fn fail(code: []const u8, message: []const u8) Outcome {
 fn run(a: Allocator) !void {
     const in = try sk.input(a);
     const kind = Value.str(in.get("kind")) orelse "";
-    if (eql(u8, kind, "call")) return sk.report("git.clone fetches through the fetch provider: send it as a message to box git (an in-VM call cannot emit)");
+    if (eql(u8, kind, "call")) return sk.report("git.clone fetches through the fetch intention: send it as a message to box git (an in-VM call cannot emit)");
     if (!eql(u8, kind, "step")) return sk.report("git is stepped on a message in its box");
     const args = in.get("args") orelse return sk.report("no args");
     const message = Value.cidOf(args.get("message")) orelse return sk.report("not a message (no message)");
@@ -132,7 +132,7 @@ fn clone(a: Allocator, in: Value, body: Value) !Outcome {
     const st = try stageOf(a, in);
     const reply = try sk.replyOf(a, in);
     if (reply == null) {
-        if (st != null) return sk.report("stepped again without the fetch provider's answer");
+        if (st != null) return sk.report("stepped again without the HTTP proxy's answer");
         return start(a, body);
     }
     const s = st orelse return sk.report("an answer with no clone under way");
@@ -251,22 +251,13 @@ fn holds(a: Allocator, c: []const u8) anyerror!bool {
     return true;
 }
 
-/// One HTTP request through the address book's `fetch` provider → the message's CID, awaited.
+/// One HTTP request as an intention (shruggr/skein#126: sk.fetch's `fetch`
+/// event, which the runtime sends, signed, to its HTTP proxy) → its CID, awaited.
 fn fetch(a: Allocator, method: []const u8, url: []const u8, headers: []const [2][]const u8, body: ?[]const u8, max: usize) ![]const u8 {
     var h = cbor.MapBuilder.init(a);
     try h.put("git-protocol", cbor.string("version=2"));
     for (headers) |x| try h.put(x[0], cbor.string(x[1]));
-    var q = cbor.MapBuilder.init(a);
-    try q.put("method", cbor.string(method));
-    try q.put("url", cbor.string(url));
-    try q.put("headers", h.value());
-    if (body) |b| try q.put("body", .{ .bytes = b });
-    try q.put("timeoutMs", cbor.int(TIMEOUT_MS));
-    try q.put("maxBytes", cbor.int(max));
-    const provider = sk.provider(a, "fetch") catch return sk.report("no fetch provider in the address book: this host gives the instance no HTTP");
-    const id = try sk.emit(a, provider, "fetch", q.value(), null);
-    try sk.awaitRecord(id);
-    return id;
+    return sk.fetchWith(a, method, url, h.value(), body, .{ .timeout_ms = TIMEOUT_MS, .max_bytes = @intCast(max) });
 }
 
 fn keepStage(a: Allocator, stage: []const u8, url: []const u8, hash: []const u8, request: []const u8) !void {
