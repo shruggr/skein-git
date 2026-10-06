@@ -19,3 +19,11 @@ the ids are fixed:
 | `0ef3ea703f1f84ab7324ff135b776154ac470d36` | commit "one" |
 | `bf45ebab0d463d141e1c4f424897b679d5dcaa2f` | `f.txt` at "three", stored whole |
 | `75ff566337d9ffe02ebff4535fc07c78fc594c27`, `a8eb7c297899d1c45ee3d4ebd9ecc877644cd982` | `f.txt` at "two" and "one", each a delta of it |
+
+# Manifests
+
+`amm-app.json` is shruggr/skein-amm 0.3.1's `etc/app.json` (commit
+`557991f`), as written: an overlay with no topics (`config.overlay` names
+lookups only, #120), mailbox rows relative to the app (`""`, `"register"`,
+`"submit"` with `filter: "beef"`, #128), http and libp2p rows, `requires:
+["chain/1"]`, start and stop. src/record.zig builds its record.

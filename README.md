@@ -4,7 +4,7 @@ The git app for a [skein](https://github.com/shruggr/skein): it clones one
 commit of a git repository into the instance's store, by hash, inside the
 VM, and builds the app record of its tree. With it an app is deployed from a
 page by two owner-signed messages: the clone, then the install (`head`,
-`dispatch`, `start`). Version **0.1.1**.
+`dispatch`, `start`). Version **0.1.2**.
 
 ## What it is
 
@@ -57,7 +57,11 @@ module block, `bin/<x>.cid` a module the instance holds, a genesis
 program's name, or a shell program `{code: "shell", modules, support?}`),
 `dispatch` with `transport` defaulted and an overlay's derived rows,
 `provides`/`requires` defaulted to `[]`, `tree`, and the installed app's
-`state` carried over. The client checks the manifest, rebuilds the record
+`state` carried over. The manifest is checked first by every rule of
+skein's `checkManifest` (`src/host/manifest.ts`), with its messages: mailbox
+boxes relative to the app (`""` or the app's name is its box, `"x"` is
+`<app>/x`, #128), `config.overlay` with `topics` optional and no prefix
+declarations (#120). The client checks the manifest, rebuilds the record
 from the stored tree and compares the CID before the owner signs the head.
 
 **What it may do.** It writes no head (its scope is `git/…`, and it uses
@@ -80,7 +84,7 @@ Submodules (gitlinks) are entries of a tree, not followed. `push` is later.
 ## Use it
 
 ```
-skein-host install https://github.com/shruggr/skein-git#v0.1.1 --instance <handle>
+skein-host install https://github.com/shruggr/skein-git#v0.1.2 --instance <handle>
 ```
 
 Then, as the owner, `{fn: "git.clone", args: {url, hash}}` to box `git`,
@@ -93,7 +97,7 @@ The manifest, `etc/app.json` (description left out):
 {
   "kind": "app",
   "name": "git",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "programs": { "git": "bin/git.wasm" },
   "provides": [{ "interface": "git/1", "functions": {
     "clone": { "writes": true, "args": { "url": "string", "hash": "string" },
@@ -144,7 +148,7 @@ store replayed.
 
 | | |
 |---|---|
-| this app | 0.1.1 (tag `v0.1.1`): fetches by the `fetch` intention (`sk.fetch`; the address book has no roles, shruggr/skein#126) |
+| this app | 0.1.2 (tag `v0.1.2`): the manifest checked by every rule of skein's `checkManifest` (an overlay may list no topics, #120; boxes relative to the app, #128). 0.1.1: fetches by the `fetch` intention (`sk.fetch`; the address book has no roles, shruggr/skein#126) |
 | skein-sdk | v0.7.1, by tag tarball and hash in `build.zig.zon` (`cbor`, `sk`, `app`, `dagjson`; no wallet) |
 | skein | log format 8; the fetch intention's `maxBytes` (#91, #126); skein's equivs pin this repo by commit |
 
