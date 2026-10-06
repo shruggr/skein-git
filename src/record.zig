@@ -7,6 +7,8 @@
 //!    programs: {<role>: <program record CID>},
 //!    dispatch: [<the manifest's rows, `transport` defaulted to "mailbox">,
 //!               <the rows config.overlay derives, unless a row has the key>],
+//!    reads?: [<the manifest's reads as written>, <the read config.overlay derives
+//!             (/lookup), unless a read has the path>]   (skein#135; only when any),
 //!    provides: [] if absent, requires: [] if absent,
 //!    tree: <the tree's CID>, state?: <the installed app's state, carried over>}
 //!
@@ -262,7 +264,7 @@ pub fn wasmKind(b: []const u8) ?WasmKind {
 // checks the same manifest; a clone it would refuse is refused here.
 
 /// A stock box, head or program name of the instance (manifest.ts RESERVED_NAMES).
-const RESERVED_NAMES = [_][]const u8{ "objects", "head", "dispatch", "peers", "claim", "subscribe", "routes", "main", "sessions", "wallet", "kernel", "frontdoor", "messagebox", "resolve" };
+const RESERVED_NAMES = [_][]const u8{ "objects", "head", "dispatch", "peers", "claim", "subscribe", "routes", "main", "sessions", "wallet", "kernel", "frontdoor", "messagebox", "resolve", "billing", "tick", "reads" };
 /// The fields of the form before #77, refused (#79).
 const LEGACY_FIELDS = [_][]const u8{ "handler", "boxes", "routes", "heads" };
 const TYPES = [_][]const u8{ "string", "int", "ms", "bytes", "cid", "bool", "map", "any" };
@@ -591,6 +593,35 @@ fn rowProblem(a: Allocator, app: []const u8, r: Value, roles: *const Roles) Erro
     return null;
 }
 
+/// A read's key (manifest.ts readKey, skein#135): its path as served, `*` for a prefix.
+fn readKey(a: Allocator, app: []const u8, r: Value) Error![]const u8 {
+    const prefix = if (r.get("prefix")) |x| (x == .bool and x.bool) else false;
+    const path = (try appPath(a, app, Value.str(r.get("address")) orelse "")) orelse "";
+    return std.fmt.allocPrint(a, "{s}{s}", .{ path, if (prefix) "*" else "" });
+}
+
+/// Why a read is not one (manifest.ts readProblem, skein#135), or null.
+fn readProblem(a: Allocator, app: []const u8, r: Value, roles: *const Roles) Error!?[]const u8 {
+    if (r != .map) return "not a map";
+    const address = Value.str(r.get("address")) orelse return "address is not text (a path under the app's)";
+    if (address.len == 0) return "address is not text (a path under the app's)";
+    switch (try appPathOf(a, app, address)) {
+        .ok => {},
+        .bad => |why| return why,
+    }
+    if (r.get("prefix")) |x| if (!(x == .bool and x.bool)) return "prefix is true or absent";
+    if (!isRole(roles, r.get("program"))) return try std.fmt.allocPrint(a, "program {s} is not a role in programs", .{try js(a, r.get("program"))});
+    const fnText = if (Value.str(r.get("fn"))) |f| f.len > 0 else false;
+    if (!fnText) return "fn is not text (a read names its function)";
+    var extra: std.ArrayList(u8) = .empty;
+    for ([_][]const u8{ "sender", "transport", "app", "optional" }) |k| if (present(r, k)) {
+        if (extra.items.len > 0) try extra.appendSlice(a, ", ");
+        try extra.appendSlice(a, k);
+    };
+    if (extra.items.len > 0) return try std.fmt.allocPrint(a, "{s}: not a read's (a read has no sender: anyone reads, signed or not; {s})", .{ extra.items, if (present(r, "app")) "app is set by the install" else "no transport: it is http" });
+    return null;
+}
+
 /// Why `shape` is not a shape (manifest.ts shapeProblem), or null.
 fn shapeProblem(a: Allocator, shape: Value, at: []const u8) Error!?[]const u8 {
     switch (shape) {
@@ -670,8 +701,8 @@ fn isShellModule(s: []const u8) bool {
 }
 
 /// The rows `config.overlay` derives, or its problems (manifest.ts
-/// overlayWiring): the app's box from `event` and from `$self`, the open http
-/// rows /submit (filter beef, #121) and /lookup, and per topic its libp2p rows
+/// overlayWiring): the app's box from `event` and from `$self`, the http row
+/// /submit (filter beef, #121; the read /lookup is check's, skein#135), and per topic its libp2p rows
 /// <topic> (submit, filter beef), <topic>-admit, <topic>-proof — all to the
 /// role `overlay`. No topics is an overlay that registers them at runtime
 /// (#120); a field other than topics, lookups, gossip is refused.
@@ -735,7 +766,6 @@ fn overlayWiring(a: Allocator, app: []const u8, ov: Value, roles: *const Roles, 
     try out.append(a, try derivedRow(a, "mailbox", app, "event", null, false));
     try out.append(a, try derivedRow(a, "mailbox", app, "$self", null, false));
     try out.append(a, try derivedRow(a, "http", "/submit", "*", "submit", true));
-    try out.append(a, try derivedRow(a, "http", "/lookup", "*", "lookup", false));
     for (topics.items) |t_| {
         try out.append(a, try derivedRow(a, "libp2p", t_, "*", "submit", true));
         try out.append(a, try derivedRow(a, "libp2p", try std.fmt.allocPrint(a, "{s}-admit", .{t_}), "*", "peerAdmit", false));
@@ -756,11 +786,15 @@ fn derivedRow(a: Allocator, transport: []const u8, address: []const u8, sender: 
     return m.value();
 }
 
+/// What the manifest asks for as installed: its rows and its reads (skein#135).
+const Wiring = struct { rows: []const Value, reads: []const Value };
+
 /// Check the manifest (manifest.ts checkManifest) → its rows as installed:
 /// the manifest's, `transport` defaulted, then what config.overlay derives
-/// (an explicit row with the same key wins). Every problem is reported, one
-/// line each, in checkManifest's order.
-fn check(b: *Build, m: Value) Error![]const Value {
+/// (an explicit row with the same key wins); and its reads (skein#135), the
+/// manifest's then the derived /lookup (an explicit read at its path wins).
+/// Every problem is reported, one line each, in checkManifest's order.
+fn check(b: *Build, m: Value) Error!Wiring {
     const a = b.a;
     var bad: Problems = .{ .a = a };
     if (!eql(u8, Value.str(m.get("kind")) orelse "", "app")) try bad.add("kind: want \"app\"", .{});
@@ -813,6 +847,24 @@ fn check(b: *Build, m: Value) Error![]const Value {
         try rows.append(a, row_);
     };
 
+    // reads (skein#135)
+    var reads: std.ArrayList(Value) = .empty;
+    var readKeys: std.StringHashMapUnmanaged(void) = .empty;
+    const rdv = m.get("reads");
+    if (rdv != null and rdv.? != .array) try bad.add("reads: not a list", .{});
+    if (rdv != null and rdv.? == .array) for (rdv.?.array, 0..) |r, i| {
+        if (try readProblem(a, app, r, &roles)) |why| {
+            try bad.add("reads[{d}]: {s}", .{ i, why });
+            continue;
+        }
+        const k = try readKey(a, app, r);
+        if ((try readKeys.getOrPut(a, k)).found_existing) {
+            try bad.add("reads[{d}]: read {s} twice", .{ i, k });
+            continue;
+        }
+        try reads.append(a, r);
+    };
+
     // provides, requires
     const pv = m.get("provides");
     if (pv != null and pv.? != .array) try bad.add("provides: not a list", .{});
@@ -851,8 +903,28 @@ fn check(b: *Build, m: Value) Error![]const Value {
     if (isMap(config)) if (config.?.get("overlay")) |ov| {
         if (try overlayWiring(a, app, ov, &roles, &bad)) |derived| {
             for (derived) |r| if (!keys.contains(try rowKey(a, app, r))) try rows.append(a, r);
+            // skein#135: BRC-24's lookup is a read (a POST served by a call).
+            var lm = cbor.MapBuilder.init(a);
+            try lm.put("address", cbor.string("/lookup"));
+            try lm.put("program", cbor.string(OVERLAY_ROLE));
+            try lm.put("fn", cbor.string("lookup"));
+            const lookup = lm.value();
+            if (!readKeys.contains(try readKey(a, app, lookup))) try reads.append(a, lookup);
         }
     };
+
+    // skein#135: a read and an http row never share a path (address and prefix).
+    for (reads.items) |r| {
+        const k = try readKey(a, app, r);
+        for (rows.items) |x| if (eql(u8, Value.str(x.get("transport")) orelse "", "http")) {
+            const xp = if (x.get("prefix")) |v| (v == .bool and v.bool) else false;
+            const xk = try std.fmt.allocPrint(a, "{s}{s}", .{ try rowAddress(a, app, x), if (xp) "*" else "" });
+            if (eql(u8, xk, k)) {
+                try bad.add("reads: {s} is an http row's path too (a path is a read or a message route, not both)", .{k});
+                break;
+            }
+        };
+    }
 
     // start, stop
     inline for (.{ "start", "stop" }) |k| if (m.get(k)) |x| {
@@ -874,7 +946,7 @@ fn check(b: *Build, m: Value) Error![]const Value {
         b.why.* = try std.fmt.allocPrint(a, "etc/app.json: {s}", .{try std.mem.join(a, "; ", bad.list.items)});
         return error.BadManifest;
     }
-    return rows.items;
+    return .{ .rows = rows.items, .reads = reads.items };
 }
 
 /// Build the app record of the tree `tree` (its CID), whose files `files`
@@ -894,7 +966,7 @@ pub fn build(a: Allocator, files: anytype, tree: []const u8, inst: Instance, why
     };
     const m = dagjson.decode(a, text) catch return b.bad("not JSON", .{});
     if (m != .map) return b.bad("not a JSON object", .{});
-    const rows = try check(&b, m);
+    const wiring = try check(&b, m);
     b.app = Value.str(m.get("name")).?;
 
     const progs = m.get("programs").?;
@@ -903,12 +975,14 @@ pub fn build(a: Allocator, files: anytype, tree: []const u8, inst: Instance, why
 
     var rec = cbor.MapBuilder.init(a);
     for (m.map) |e| {
-        if (eql(u8, e.key, "programs") or eql(u8, e.key, "dispatch") or eql(u8, e.key, "provides") or eql(u8, e.key, "requires") or eql(u8, e.key, "tree")) continue;
+        if (eql(u8, e.key, "programs") or eql(u8, e.key, "dispatch") or eql(u8, e.key, "reads") or eql(u8, e.key, "provides") or eql(u8, e.key, "requires") or eql(u8, e.key, "tree")) continue;
         if (eql(u8, e.key, "state") and inst.state != null) continue;
         try rec.put(e.key, e.value);
     }
     try rec.put("programs", programs.value());
-    try rec.put("dispatch", .{ .array = rows });
+    try rec.put("dispatch", .{ .array = wiring.rows });
+    // skein#135: `reads` only when there are any (an app with none has the record it had).
+    if (wiring.reads.len > 0) try rec.put("reads", .{ .array = wiring.reads });
     inline for (.{ "provides", "requires" }) |k| try rec.put(k, m.get(k) orelse Value{ .array = &.{} });
     try rec.put("tree", cbor.cidv(tree));
     if (inst.state) |s| try rec.put("state", cbor.cidv(s));
@@ -1011,15 +1085,19 @@ test "an overlay app's derived rows, under the manifest's own" {
     const out = try build(a, MemFiles{ .files = &.{ .{ "etc/app.json", manifest }, .{ "bin/o.wasm", wasm } } }, try cid.ofGit(a, "tree 0\x00"), .{ .has = holdsNothing }, &why);
     const rows = out.record.get("dispatch").?.array;
     // the manifest's /submit (as served /ov/submit) wins over the derived one
-    try t.expectEqual(@as(usize, 1 + 3 + 3), rows.len);
+    try t.expectEqual(@as(usize, 1 + 2 + 3), rows.len);
     try t.expectEqualStrings("mine", Value.str(rows[0].get("fn")).?);
     try t.expectEqualStrings("event", Value.str(rows[1].get("sender")).?);
-    try t.expectEqualStrings("tm_x-proof", Value.str(rows[6].get("address")).?);
+    try t.expectEqualStrings("tm_x-proof", Value.str(rows[5].get("address")).?);
     // #121: the submit rows decode the BEEF at the kernel's door
-    try t.expectEqualStrings("/lookup", Value.str(rows[3].get("address")).?);
-    try t.expect(rows[3].get("filter") == null);
-    try t.expectEqualStrings("tm_x", Value.str(rows[4].get("address")).?);
-    try t.expectEqualStrings("beef", Value.str(rows[4].get("filter")).?);
+    try t.expectEqualStrings("tm_x", Value.str(rows[3].get("address")).?);
+    try t.expectEqualStrings("beef", Value.str(rows[3].get("filter")).?);
+    // skein#135: /lookup is a read, derived into `reads`
+    const reads = out.record.get("reads").?.array;
+    try t.expectEqual(@as(usize, 1), reads.len);
+    try t.expectEqualStrings("/lookup", Value.str(reads[0].get("address")).?);
+    try t.expectEqualStrings("lookup", Value.str(reads[0].get("fn")).?);
+    try t.expect(reads[0].get("sender") == null);
     // two roles of one file: one module, one program record (the same record), the app record
     try t.expectEqual(@as(usize, 3), out.blocks.len);
 }
@@ -1063,8 +1141,8 @@ test "skein-amm 0.3.1's manifest: an overlay with no topics, relative boxes" {
     };
     try t.expectEqualStrings("amm", out.name);
     const rows = out.record.get("dispatch").?.array;
-    // its 16 rows (the box "" from event and from $self among them: the derived box rows' keys), then /submit and /lookup
-    try t.expectEqual(@as(usize, 16 + 2), rows.len);
+    // its 16 rows (the box "" from event and from $self among them: the derived box rows' keys), then /submit (skein#135: /lookup a read)
+    try t.expectEqual(@as(usize, 16 + 1), rows.len);
     try t.expectEqualStrings("register", Value.str(rows[0].get("address")).?);
     try t.expectEqualStrings("", Value.str(rows[1].get("address")).?); // as written; the kernel's table holds amm
     try t.expectEqualStrings("submit", Value.str(rows[5].get("address")).?);
@@ -1073,7 +1151,7 @@ test "skein-amm 0.3.1's manifest: an overlay with no topics, relative boxes" {
     try t.expectEqualStrings("/submit", Value.str(rows[16].get("address")).?);
     try t.expectEqualStrings("http", Value.str(rows[16].get("transport")).?);
     try t.expectEqualStrings("beef", Value.str(rows[16].get("filter")).?);
-    try t.expectEqualStrings("/lookup", Value.str(rows[17].get("address")).?);
+    try t.expectEqualStrings("/lookup", Value.str(out.record.get("reads").?.array[0].get("address")).?);
     try t.expectEqualStrings("chain/1", Value.str(out.record.get("requires").?.array[0]).?);
     try t.expectEqual(@as(usize, 3), out.record.get("provides").?.array.len);
     for (rows) |r| try t.expect(!eql(u8, Value.str(r.get("transport")).?, "libp2p") or Value.str(r.get("address")).?[0] == '/');
@@ -1096,7 +1174,7 @@ test "config.overlay: no prefix declarations (#120), topics optional, its fields
         var why: []const u8 = "";
         const out = try build(a, try treeOf(a, head ++ rest), try cid.ofGit(a, "tree 0\x00"), .{ .has = holdsNothing }, &why);
         const rows = out.record.get("dispatch").?.array;
-        try t.expectEqual(@as(usize, 4), rows.len);
+        try t.expectEqual(@as(usize, 3), rows.len);
         try t.expectEqualStrings("ov", Value.str(rows[0].get("address")).?);
         try t.expectEqualStrings("event", Value.str(rows[0].get("sender")).?);
         try t.expectEqualStrings("$self", Value.str(rows[1].get("sender")).?);
@@ -1149,3 +1227,23 @@ test "the rest of checkManifest: names, rows, interfaces, shapes" {
     try t.expectEqualStrings("etc/app.json: programs.sh.modules.brush: bin/brush.wasm is not in the tree; programs.sh.modules: no coreutils (the shell is brush over coreutils)", try refusal(a, "{\"kind\":\"app\",\"name\":\"x\",\"version\":\"0.1.0\",\"programs\":{\"sh\":{\"code\":\"shell\",\"modules\":{\"brush\":\"bin/brush.wasm\"}}}}"));
 }
 
+
+test "reads[] (skein#135): checked as manifest.ts checks them; in the record as written; never at an http row's path; none, no field" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const head = "{\"kind\":\"app\",\"name\":\"site\",\"version\":\"1.0.0\",\"programs\":{\"site\":\"bin/o.wasm\"},";
+    var why: []const u8 = "";
+    const out = try build(a, try treeOf(a, head ++ "\"reads\":[{\"address\":\"/\",\"prefix\":true,\"program\":\"site\",\"fn\":\"get\",\"root\":\"www\"}]}"), try cid.ofGit(a, "tree 0\x00"), .{ .has = holdsNothing }, &why);
+    const reads = out.record.get("reads").?.array;
+    try t.expectEqual(@as(usize, 1), reads.len);
+    try t.expectEqualStrings("www", Value.str(reads[0].get("root")).?);
+    try t.expectEqual(@as(usize, 0), out.record.get("dispatch").?.array.len);
+    const none = try build(a, try treeOf(a, head ++ "\"dispatch\":[]}"), try cid.ofGit(a, "tree 0\x00"), .{ .has = holdsNothing }, &why);
+    try t.expect(none.record.get("reads") == null);
+    try t.expectEqualStrings("etc/app.json: reads[0]: sender: not a read's (a read has no sender: anyone reads, signed or not; no transport: it is http)", try refusal(a, head ++ "\"reads\":[{\"address\":\"/x\",\"program\":\"site\",\"fn\":\"get\",\"sender\":\"*\"}]}"));
+    try t.expectEqualStrings("etc/app.json: reads[0]: fn is not text (a read names its function)", try refusal(a, head ++ "\"reads\":[{\"address\":\"/x\",\"program\":\"site\"}]}"));
+    try t.expectEqualStrings("etc/app.json: reads[1]: read /site/x twice", try refusal(a, head ++ "\"reads\":[{\"address\":\"/x\",\"program\":\"site\",\"fn\":\"a\"},{\"address\":\"x\",\"program\":\"site\",\"fn\":\"b\"}]}"));
+    try t.expectEqualStrings("etc/app.json: reads: /site/x is an http row's path too (a path is a read or a message route, not both)", try refusal(a, head ++ "\"dispatch\":[{\"transport\":\"http\",\"address\":\"/x\",\"sender\":\"session\",\"program\":\"site\",\"fn\":\"p\"}],\"reads\":[{\"address\":\"/x\",\"program\":\"site\",\"fn\":\"get\"}]}"));
+    try t.expectEqualStrings("etc/app.json: name: reads is a stock box, head or program of the instance", try refusal(a, "{\"kind\":\"app\",\"name\":\"reads\",\"version\":\"1.0.0\",\"programs\":{\"site\":\"bin/o.wasm\"}}"));
+}

@@ -4,7 +4,7 @@ The git app for a [skein](https://github.com/shruggr/skein): it clones one
 commit of a git repository into the instance's store, by hash, inside the
 VM, and builds the app record of its tree. With it an app is deployed from a
 page by two owner-signed messages: the clone, then the install (`head`,
-`dispatch`, `start`). Version **0.1.2**.
+`dispatch`, `start`). Version **0.1.3**.
 
 ## What it is
 
@@ -84,7 +84,7 @@ Submodules (gitlinks) are entries of a tree, not followed. `push` is later.
 ## Use it
 
 ```
-skein-host install https://github.com/shruggr/skein-git#v0.1.2 --instance <handle>
+skein-host install https://github.com/shruggr/skein-git#v0.1.3 --instance <handle>
 ```
 
 Then, as the owner, `{fn: "git.clone", args: {url, hash}}` to box `git`,
@@ -97,7 +97,7 @@ The manifest, `etc/app.json` (description left out):
 {
   "kind": "app",
   "name": "git",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "programs": { "git": "bin/git.wasm" },
   "provides": [{ "interface": "git/1", "functions": {
     "clone": { "writes": true, "args": { "url": "string", "hash": "string" },
@@ -148,7 +148,7 @@ store replayed.
 
 | | |
 |---|---|
-| this app | 0.1.2 (tag `v0.1.2`): the manifest checked by every rule of skein's `checkManifest` (an overlay may list no topics, #120; boxes relative to the app, #128). 0.1.1: fetches by the `fetch` intention (`sk.fetch`; the address book has no roles, shruggr/skein#126) |
+| this app | 0.1.3 (tag `v0.1.3`): an app's `reads[]` in its record (shruggr/skein#135: checked as `checkManifest` checks them; an overlay's `/lookup` derived into `reads`, no longer a row; `reads` a reserved name). 0.1.2: the manifest checked by every rule of skein's `checkManifest` (an overlay may list no topics, #120; boxes relative to the app, #128). 0.1.1: fetches by the `fetch` intention (`sk.fetch`; the address book has no roles, shruggr/skein#126) |
 | skein-sdk | v0.7.1, by tag tarball and hash in `build.zig.zon` (`cbor`, `sk`, `app`, `dagjson`; no wallet) |
 | skein | log format 8; the fetch intention's `maxBytes` (#91, #126); skein's equivs pin this repo by commit |
 
