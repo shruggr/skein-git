@@ -3,8 +3,8 @@
 The git app for a [skein](https://github.com/shruggr/skein): it clones one
 commit of a git repository into the instance's store, by hash, inside the
 VM, and builds the app record of its tree. With it an app is deployed from a
-page by two owner-signed messages: the clone, then the install (`head`,
-`dispatch`, `start`). Version **0.1.3**.
+page by two root-signed messages: the clone, then the install (`head`,
+`dispatch`, `start`). Version **0.2.0**.
 
 ## What it is
 
@@ -14,7 +14,7 @@ One program, `bin/git.wasm`, interface `git/1`, one function:
 |---|---|---|
 | `git.clone` (`writes: true`) | `{url, hash}` | `{tree, app}` |
 
-It is reached in one box, `git`, from the owner (`$owner`). `url` is an
+It is reached in one box, `git`, by a mailbox route to `git.call`, a function gated by the role `root` (shruggr/skein#143). `url` is an
 http(s) git repository; `hash` is a commit id (40 hex digits). The answer is
 a message to the sender in box `git` (when the address book reaches the
 sender) and, either way, the request thread's result:
@@ -55,20 +55,23 @@ tree, byte for byte (skein `src/host/install.ts`, `docs/APPS.md` §2): the
 manifest as written, `programs` → program records (`bin/<x>.wasm` a raw
 module block, `bin/<x>.cid` a module the instance holds, a genesis
 program's name, or a shell program `{code: "shell", modules, support?}`),
-`dispatch` with `transport` defaulted and an overlay's derived rows,
+`routes` with `transport` defaulted and an overlay's derived routes,
+`filters` as declared (an overlay's `lookup` added), `roles` as written,
 `provides`/`requires` defaulted to `[]`, `tree`, and the installed app's
 `state` carried over. The manifest is checked first by every rule of
-skein's `checkManifest` (`src/host/manifest.ts`), with its messages: mailbox
+skein's `checkManifest` (`src/host/manifest.ts`), with its messages: routes,
+filters and roles (shruggr/skein#143: `dispatch`, `reads`, a route's
+`sender` and every `$<name>` refused), mailbox and event
 boxes relative to the app (`""` or the app's name is its box, `"x"` is
 `<app>/x`, #128), `config.overlay` with `topics` optional and no prefix
 declarations (#120). The client checks the manifest, rebuilds the record
-from the stored tree and compares the CID before the owner signs the head.
+from the stored tree and compares the CID before root signs the head.
 
 **What it may do.** It writes no head (its scope is `git/…`, and it uses
 none): blocks are content-addressed and unscoped, so keeping them grants
-nothing and mounts nothing. Only the owner's `head` message makes the tree
-an app, and only the owner's `dispatch` messages give it rows. It has no
-`$self` row and sends nothing to its own instance.
+nothing and mounts nothing. Only root's `head` message makes the tree
+an app, and only root's `dispatch` messages give it routes. It sends
+nothing to its own instance.
 
 Error codes: `bad-request` (not `{fn, args}`), `unknown-fn`, `bad-args` (the
 url or the hash is not one), `unreachable` (the HTTP proxy could not
@@ -84,12 +87,12 @@ Submodules (gitlinks) are entries of a tree, not followed. `push` is later.
 ## Use it
 
 ```
-skein-host install https://github.com/shruggr/skein-git#v0.1.3 --instance <handle>
+skein-host install https://github.com/shruggr/skein-git#v0.2.0 --instance <handle>
 ```
 
-Then, as the owner, `{fn: "git.clone", args: {url, hash}}` to box `git`,
+Then, as root, `{fn: "git.clone", args: {url, hash}}` to box `git`,
 and the install by the kernel's operations: `head {name: "<app>/app",
-tree: <app>}`, a `dispatch` per row, `start` (skein `docs/APPS.md` §3).
+tree: <app>}`, a `dispatch` per route, `start` (skein `docs/APPS.md` §3).
 
 The manifest, `etc/app.json` (description left out):
 
@@ -97,13 +100,14 @@ The manifest, `etc/app.json` (description left out):
 {
   "kind": "app",
   "name": "git",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "programs": { "git": "bin/git.wasm" },
   "provides": [{ "interface": "git/1", "functions": {
     "clone": { "writes": true, "args": { "url": "string", "hash": "string" },
       "answer": { "tree": "cid", "app": "cid" } } } }],
   "requires": [],
-  "dispatch": [{ "address": "git", "sender": "$owner", "program": "git" }]
+  "routes": [{ "address": "git", "handler": "git.call" }],
+  "roles": { "root": ["call"] }
 }
 ```
 
@@ -148,7 +152,7 @@ store replayed.
 
 | | |
 |---|---|
-| this app | 0.1.3 (tag `v0.1.3`): an app's `reads[]` in its record (shruggr/skein#135: checked as `checkManifest` checks them; an overlay's `/lookup` derived into `reads`, no longer a row; `reads` a reserved name). 0.1.2: the manifest checked by every rule of skein's `checkManifest` (an overlay may list no topics, #120; boxes relative to the app, #128). 0.1.1: fetches by the `fetch` intention (`sk.fetch`; the address book has no roles, shruggr/skein#126) |
+| this app | 0.2.0 (tag `v0.2.0`): skein's routes, filters and roles (shruggr/skein#143: the manifest checked as `checkManifest` on that shape — `dispatch`, `reads`, senders and `$<name>` refused; the record carries `routes`, `filters`, `roles`; an overlay's `/lookup` a read route with the filter `<app>.lookup`, `market`/`validator` settings checked; `grant`, `grants`, `root`, `user` reserved names); its own route gated by root. 0.1.3: an app's `reads[]` in its record (shruggr/skein#135: checked as `checkManifest` checks them; an overlay's `/lookup` derived into `reads`, no longer a row; `reads` a reserved name). 0.1.2: the manifest checked by every rule of skein's `checkManifest` (an overlay may list no topics, #120; boxes relative to the app, #128). 0.1.1: fetches by the `fetch` intention (`sk.fetch`; the address book has no roles, shruggr/skein#126) |
 | skein-sdk | v0.7.1, by tag tarball and hash in `build.zig.zon` (`cbor`, `sk`, `app`, `dagjson`; no wallet) |
 | skein | log format 8; the fetch intention's `maxBytes` (#91, #126); skein's equivs pin this repo by commit |
 

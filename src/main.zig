@@ -1,9 +1,9 @@
 //! git (shruggr/skein#91): the git app. It clones one commit of a git
 //! repository into the instance's store, by hash, and builds the app record
-//! of its tree — so an app can be deployed from a page by two owner-signed
+//! of its tree — so an app can be deployed from a page by two root-signed
 //! messages: this one, then the install (`head`, `dispatch`, `start`).
 //!
-//!   a mailbox row  {address: "git", sender: "$owner", program: git}
+//!   a mailbox route  {address: "git", handler: "git.call"}, `call` gated by root (skein#143)
 //!
 //!   {fn: "git.clone", args: {url, hash}}      url: an http(s) git repository; hash: a commit id (40 hex)
 //!     → {fn, request, replyTo, result: {tree: <cid>, app: <cid>}}
@@ -33,8 +33,8 @@
 //!
 //! It holds no key, signs nothing but its own messages, and writes no head:
 //! blocks are content-addressed and unscoped, so keeping them grants nothing
-//! and mounts nothing. Only the owner's `head` message makes the tree an
-//! app; the owner's `dispatch` messages give it rows.
+//! and mounts nothing. Only root's `head` message makes the tree an
+//! app; root's `dispatch` messages give it routes.
 //!
 //! Error codes: bad-request (not {fn, args}), unknown-fn, bad-args (the url or
 //! the hash is not one), unreachable (the HTTP proxy could not reach the

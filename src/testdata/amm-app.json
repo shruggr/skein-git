@@ -1,7 +1,7 @@
 {
   "kind": "app",
   "name": "amm",
-  "version": "0.3.1",
+  "version": "0.7.1",
   "programs": {
     "overlay": "bin/overlay.wasm",
     "mandala-topic": "bin/mandala-topic.wasm",
@@ -25,11 +25,6 @@
       }
     },
     "amm": {
-      "ammP2p": {
-        "heartbeatSeconds": 30,
-        "offlineSeconds": 90,
-        "market": false
-      },
       "ammValidator": {
         "minValidatorFeeBps": 5,
         "maxLpFeeBps": 100,
@@ -51,6 +46,7 @@
             "swap": "bytes",
             "pool": "string",
             "validator": "bytes",
+            "peerId": "string",
             "expires": "ms"
           },
           "answer": {
@@ -110,6 +106,7 @@
             "funding": "bytes",
             "deploy": "bytes",
             "validator": "bytes",
+            "peerId": "string",
             "expires": "ms"
           },
           "answer": {
@@ -161,6 +158,7 @@
             "add": "bytes",
             "pool": "string",
             "validator": "bytes",
+            "peerId": "string",
             "expires": "ms"
           },
           "answer": {
@@ -208,121 +206,105 @@
   "requires": [
     "chain/1"
   ],
-  "dispatch": [
+  "filters": {
+    "listTopicManagers": "overlay.listTopicManagers",
+    "listLookupServiceProviders": "overlay.listLookupServiceProviders",
+    "topicDocumentation": "overlay.topicDocumentation",
+    "lookupDocumentation": "overlay.lookupDocumentation",
+    "tokens": "mandala-lookup.tokens",
+    "page": "amm-p2p.serve"
+  },
+  "roles": {
+    "root": [
+      "register",
+      "market",
+      "validator"
+    ]
+  },
+  "routes": [
     {
       "address": "register",
-      "sender": "$owner",
-      "program": "overlay"
-    },
-    {
-      "address": "",
-      "sender": "event",
-      "program": "overlay"
-    },
-    {
-      "address": "",
-      "sender": "$self",
-      "program": "overlay"
-    },
-    {
-      "address": "",
-      "sender": "*",
-      "program": "amm-p2p"
-    },
-    {
-      "address": "amm-p2p",
-      "sender": "*",
-      "program": "amm-p2p"
+      "handler": "overlay.register"
     },
     {
       "address": "submit",
-      "sender": "*",
-      "program": "overlay",
-      "filter": "beef"
+      "filters": [
+        "kernel.beef"
+      ],
+      "handler": "overlay.submit"
     },
     {
-      "transport": "http",
-      "address": "/listTopicManagers",
-      "sender": "*",
-      "program": "overlay",
-      "fn": "listTopicManagers"
-    },
-    {
-      "transport": "http",
-      "address": "/listLookupServiceProviders",
-      "sender": "*",
-      "program": "overlay",
-      "fn": "listLookupServiceProviders"
-    },
-    {
-      "transport": "http",
-      "address": "/getDocumentationForTopicManager",
-      "sender": "*",
-      "program": "overlay",
-      "fn": "topicDocumentation"
-    },
-    {
-      "transport": "http",
-      "address": "/getDocumentationForLookupServiceProvider",
-      "sender": "*",
-      "program": "overlay",
-      "fn": "lookupDocumentation"
-    },
-    {
-      "transport": "http",
-      "address": "/live",
-      "sender": "*",
-      "program": "amm-p2p",
-      "fn": "live"
+      "address": "amm-p2p",
+      "handler": "amm-p2p"
     },
     {
       "transport": "http",
       "address": "/call",
-      "sender": "*",
-      "program": "amm-p2p",
-      "fn": "call"
+      "filters": [
+        "kernel.brc104"
+      ],
+      "handler": "amm-p2p.call"
+    },
+    {
+      "transport": "libp2p",
+      "address": "/amm-validator/1/swap",
+      "handler": "amm-validator.swap"
+    },
+    {
+      "transport": "libp2p",
+      "address": "/amm-validator/1/addLiquidity",
+      "handler": "amm-validator.addLiquidity"
+    },
+    {
+      "transport": "libp2p",
+      "address": "/amm-validator/1/deploy",
+      "handler": "amm-validator.deploy"
+    },
+    {
+      "transport": "http",
+      "address": "/listTopicManagers",
+      "filters": [
+        "listTopicManagers"
+      ]
+    },
+    {
+      "transport": "http",
+      "address": "/listLookupServiceProviders",
+      "filters": [
+        "listLookupServiceProviders"
+      ]
+    },
+    {
+      "transport": "http",
+      "address": "/getDocumentationForTopicManager",
+      "filters": [
+        "topicDocumentation"
+      ]
+    },
+    {
+      "transport": "http",
+      "address": "/getDocumentationForLookupServiceProvider",
+      "filters": [
+        "lookupDocumentation"
+      ]
+    },
+    {
+      "transport": "http",
+      "address": "/mandala/tokens",
+      "filters": [
+        "tokens"
+      ]
     },
     {
       "transport": "http",
       "address": "/",
       "prefix": true,
-      "sender": "*",
-      "program": "amm-p2p",
-      "fn": "serve",
+      "filters": [
+        "page"
+      ],
       "root": "www",
       "index": "index.html"
-    },
-    {
-      "transport": "libp2p",
-      "address": "/amm-validator/1/swap",
-      "sender": "*",
-      "program": "amm-validator",
-      "fn": "swap"
-    },
-    {
-      "transport": "libp2p",
-      "address": "/amm-validator/1/addLiquidity",
-      "sender": "*",
-      "program": "amm-validator",
-      "fn": "addLiquidity"
-    },
-    {
-      "transport": "libp2p",
-      "address": "/amm-validator/1/deploy",
-      "sender": "*",
-      "program": "amm-validator",
-      "fn": "deploy"
     }
   ],
-  "start": {
-    "body": {
-      "kind": "amm-p2p-start"
-    }
-  },
-  "stop": {
-    "body": {
-      "kind": "amm-p2p-stop"
-    }
-  },
-  "description": "An AMM over Mandala tokens (docs/AMM.md): the overlay engine (shruggr/skein-overlay 0.7.7, required: chain/1) with the Mandala components (shruggr/skein-mandala 0.5.2: the topic manager mandala-topic, one topic per token tm_<txid> and the discovery topic tm_mandala_deploys; the lookups ls_mandala and ls_mandala_deploys), the pool liquidity lookup ls_amm (amm-lookup, one service over every token topic, each query naming its token), the validator (amm-validator: swap, addLiquidity, deploy as libp2p direct calls; it submits the signed transaction to its own overlay by message, {fn: \"submit\"} in the box submit (<app>/submit), and answers the call on the engine's answer) and amm-p2p: the validator liveness beacon (a beacon event per served token topic, tm_<txid>-live, published by the host), the marketplace relay (amm.swap/1, amm.pool/1, amm.liquidity/1: a taker's or an LP's transaction carried to its validator) and the pages, www/ served from the app's own tree (skein-sdk files.serve). Anyone submits to the engine by message in the box submit (<app>/submit), and POST /submit admits there too (skein-overlay 0.7.6); the app's own box <app> is amm-p2p's. The manifest declares no topics: the owner registers each token topic with the engine, a message in the app's box register (<app>/register once installed) {fn: \"register\", args: {topic, program: \"mandala-topic\"}}, and drops it with {fn: \"deregister\", args: {topic}}. The owner starts the beacon with the manifest's start, {kind: \"amm-p2p-start\"} in the app's box, and sends it again after a register or deregister. A host serving a market (config.amm.ammP2p.market: true) also subscribes, at each start, the tm_<txid>-live beacons of the tokens it serves (subscribe {topic, program: \"amm-p2p\", fn: \"validateLive\"}, shruggr/skein#119) and keeps the validator map the relay picks from; a stop unsubscribes them."
+  "description": "An AMM over Mandala tokens (docs/AMM.md): the overlay engine (shruggr/skein-overlay 0.10.0, required: chain/1) with the Mandala components (shruggr/skein-mandala 0.8.1: the topic manager mandala-topic, one topic per token tm_<txid> and the discovery topic tm_mandala; the lookups ls_mandala and ls_mandala_deploys; the token list, the read route /mandala/tokens of mandala-lookup), the pool liquidity lookup ls_amm (amm-lookup, one service over every token topic, each query naming its token), the validator (amm-validator: swap, addLiquidity, deploy as libp2p direct calls; it submits the signed transaction to its own overlay by message, {fn: \"submit\"} in the box submit (<app>/submit), and answers the call on the engine's answer) and amm-p2p: the marketplace relay (its box <app>/amm-p2p and the route /call; amm.swap/1, amm.pool/1, amm.liquidity/1: a taker's or an LP's transaction carried to the validator the caller names by identity key and libp2p peer ID, dialled, or handed in-VM to this instance's own amm-validator when that peer is this node) and the pages, www/ served from the app's own tree (skein-sdk files.serve) by the read route / (its filter page, amm-p2p's serve: anyone, signed or not, nothing logged; shruggr/skein#143), beside the engine's listing and documentation read routes and its derived /lookup; /call takes a signed request (kernel.brc104), the derived /submit a BEEF that validates (kernel.beef). Anyone submits to the engine by message in the box submit (<app>/submit), answered by message, or by POST /submit, BRC-22: it waits and answers the STEAK (skein-overlay 0.9.1+); the app's own box <app> is the engine's (derived), amm-p2p's box is <app>/amm-p2p (0.7.0). The manifest declares no topics: root registers each token topic with the engine, a message in the app's box register (<app>/register once installed; the handler overlay.register, gated by roles: {root: [register, market, validator]}) {fn: \"register\", args: {topic, program: \"mandala-topic\"}}, and drops it with {fn: \"deregister\", args: {topic}}. Market and validator are two roles of the engine (shruggr/skein#120, 0.6.0), root's switch (0.6.2, skein-overlay 0.9.2): {fn: \"market\", args: {window} | {off: true}} / {fn: \"validator\", args: {every} | {off: true}} in <app>/register (the Market and Validator switches on the mandala/tokens/ page), kept beside the registered set in <app>/topics, over config.overlay.market / .validator (the initial value, e.g. --config at install): with the market on {window: ms} a register also asks the runtime's liveness tool for the topic's tm_<txid>-live beats (liveness, window), served at GET /amm/.live/tm_<txid>-live, which the pages read to name a validator; with the validator on {every: ms} it also beacons tm_<txid>-live every that many ms (beacon, no body: the frame carries the instance's identity key, the gossip message its peer ID), and amm-validator signs swaps and takes on new liquidity (addLiquidity, deploy) for any registered token, refusing them not_validating without it. A deregister reverses both; switching a role emits for every registered token. This manifest sets neither: both are off until root turns one on."
 }

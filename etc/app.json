@@ -1,7 +1,7 @@
 {
   "kind": "app",
   "name": "git",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "programs": {
     "git": "bin/git.wasm"
   },
@@ -24,12 +24,16 @@
     }
   ],
   "requires": [],
-  "dispatch": [
+  "description": "The git app (shruggr/skein#91): {fn: \"git.clone\", args: {url, hash}} from the owner fetches one commit of an http(s) git repository through the fetch intention (smart HTTP, protocol version 2, one shallow pack), checks it against the hash, keeps its commit, trees and blobs as blocks, builds the app record of its tree from etc/app.json and answers {tree, app}. It writes no head: the owner's head message installs.",
+  "routes": [
     {
       "address": "git",
-      "sender": "$owner",
-      "program": "git"
+      "handler": "git.call"
     }
   ],
-  "description": "The git app (shruggr/skein#91): {fn: \"git.clone\", args: {url, hash}} from the owner fetches one commit of an http(s) git repository through the fetch intention (smart HTTP, protocol version 2, one shallow pack), checks it against the hash, keeps its commit, trees and blobs as blocks, builds the app record of its tree from etc/app.json and answers {tree, app}. It writes no head: the owner's head message installs."
+  "roles": {
+    "root": [
+      "call"
+    ]
+  }
 }

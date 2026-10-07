@@ -22,8 +22,11 @@ the ids are fixed:
 
 # Manifests
 
-`amm-app.json` is shruggr/skein-amm 0.3.1's `etc/app.json` (commit
-`557991f`), as written: an overlay with no topics (`config.overlay` names
-lookups only, #120), mailbox rows relative to the app (`""`, `"register"`,
-`"submit"` with `filter: "beef"`, #128), http and libp2p rows, `requires:
-["chain/1"]`, start and stop. src/record.zig builds its record.
+`amm-app.json` is shruggr/skein-amm 0.7.1's `etc/app.json` (commit
+`00a731b`), as written: skein's routes, filters and roles (shruggr/skein#143)
+— mailbox routes relative to the app (`"register"`, `"submit"` with
+`filters: ["kernel.beef"]`, `"amm-p2p"`, #128), http routes with a handler
+and read routes (filters, no handler; `/` a prefix with `root` and `index`
+settings), libp2p routes, declared filters, `roles: {root: [...]}`, an
+overlay with no topics (`config.overlay` names lookups only, #120),
+`requires: ["chain/1"]`. src/record.zig builds its record.
